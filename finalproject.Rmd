@@ -1,0 +1,378 @@
+---
+title: "finalproject"
+output: html_document
+date: "2025-11-29"
+---
+```{r}
+library(readxl)
+df <- read_excel("selfesteem_data.xlsx")
+install.packages(c("psych", "lavaan", "semTools"))
+library(tidyr)
+library(dplyr)
+library(psych)
+library(lavaan)
+library(semTools)
+
+```
+```{r}
+#creating summary df to show the distribution of each variable and question in a long table 
+summary_long <- df %>%
+  summarise(across(
+    everything(),
+    list(mean = ~mean(. , na.rm = TRUE),
+         median = ~median(. , na.rm = TRUE))
+  )) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = c("variable", ".value"),
+    names_sep = "_"
+  )
+
+summary_long
+```
+```{r}
+#calculating average response to depressive symptom survey questions (0-3)
+total_sum_DS <- sum(df %>% select(starts_with("DS")) %>% unlist() %>% as.numeric(), na.rm = TRUE)
+
+# Number of non-missing values
+total_n_DS <- sum(!is.na(df %>% select(starts_with("DS")) %>% unlist()))
+
+# Manual mean
+mean_DS <- total_sum_DS / total_n_DS
+
+mean_DS
+
+```
+```{r}
+#calculating average response to self-esteem symptom survey questions (1-4)
+total_sum_SE <- sum(df %>% select(starts_with("SE")) %>% unlist() %>% as.numeric(), na.rm = TRUE)
+
+# Number of non-missing values
+total_n_SE <- sum(!is.na(df %>% select(starts_with("SE")) %>% unlist()))
+
+# Manual mean
+mean_SE <- total_sum_SE / total_n_SE
+
+mean_SE
+```
+```{r}
+#calculating average response to hope symptom survey questions (1-6)
+total_sum_H <- sum(df %>% select(starts_with("H")) %>% unlist() %>% as.numeric(), na.rm = TRUE)
+
+# Number of non-missing values
+total_n_H <- sum(!is.na(df %>% select(starts_with("H")) %>% unlist()))
+
+# Manual mean
+mean_H <- total_sum_H / total_n_H
+
+mean_H
+```
+```{r}
+#mutate "Age" column so it's not included in the anxiety calculations (also starts with "A")
+
+df <- df %>%
+  rename(age = Age)
+
+#calculating average response to anxiety symptom survey questions (1-4)
+total_sum_A <- sum(df %>% select(starts_with("A")) %>% unlist() %>% as.numeric(), na.rm = TRUE)
+
+# Number of non-missing values
+total_n_A <- sum(!is.na(df %>% select(starts_with("A")) %>% unlist()))
+
+# Manual mean
+mean_A <- total_sum_A / total_n_A
+
+mean_A
+```
+```{r}
+#visualize z-scores for each scale to analyze responses across the df 
+
+library(ggplot2)
+df <- df %>%
+  mutate(
+    SE_total = rowMeans(select(., all_of(esteem_items)), na.rm = TRUE),
+    DS_total = rowMeans(select(., all_of(depressive_items)), na.rm = TRUE),
+    H_total  = rowMeans(select(., all_of(hope_items)), na.rm = TRUE),
+    A_total  = rowMeans(select(., all_of(anxiety_items)), na.rm = TRUE)
+  )
+df <- df %>%
+  mutate(
+    SE_z = as.numeric(scale(SE_total)),
+    DS_z = as.numeric(scale(DS_total)),
+    H_z  = as.numeric(scale(H_total)),
+    A_z  = as.numeric(scale(A_total))
+  )
+df %>%
+  select(SE_z, DS_z, H_z, A_z) %>%
+  pivot_longer(everything(), names_to = "scale", values_to = "z") %>%
+  ggplot(aes(x = scale, y = z)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Z-Standardized Total Variable Scores",
+       x = "Variable",
+       y = "Z-Score")
+```
+```{r}
+#creating items for correlation matrix
+```
+
+```{r}
+
+
+# ---------------------------------------
+# 1. Define item groups
+# ---------------------------------------
+
+selfesteem_items  <- paste0("SE", 1:10)
+depression_items  <- paste0("DS", 1:20)
+anxiety_items     <- paste0("A", 1:10)
+hope_items        <- paste0("H", 1:6)
+
+# ---------------------------------------
+# 2. Convert items to numeric (very important)
+# ---------------------------------------
+
+df[selfesteem_items]  <- lapply(df[selfesteem_items],  function(x) as.numeric(as.character(x)))
+df[depression_items]  <- lapply(df[depression_items],  function(x) as.numeric(as.character(x)))
+df[anxiety_items]     <- lapply(df[anxiety_items],     function(x) as.numeric(as.character(x)))
+df[hope_items]        <- lapply(df[hope_items],        function(x) as.numeric(as.character(x)))
+
+# ---------------------------------------
+# 3. Compute composite scores (row means)
+# ---------------------------------------
+
+df$SelfEsteem       <- rowSums(df[selfesteem_items], na.rm = TRUE)
+df$DepressiveSympt  <- rowSums(df[depression_items], na.rm = TRUE)
+df$Anxiety          <- rowSums(df[anxiety_items], na.rm = TRUE)
+df$Hope             <- rowSums(df[hope_items], na.rm = TRUE)
+
+# ---------------------------------------
+# 4. Compute Cronbach's alphas
+# ---------------------------------------
+
+alpha_selfesteem <- psych::alpha(df[selfesteem_items])$total$raw_alpha
+alpha_dep        <- psych::alpha(df[depression_items])$total$raw_alpha
+alpha_anxiety    <- psych::alpha(df[anxiety_items])$total$raw_alpha
+alpha_hope       <- psych::alpha(df[hope_items])$total$raw_alpha
+
+alphas <- c(
+ NA,        # Gender
+  NA,        # Age
+  alpha_selfesteem,
+  alpha_hope,
+  alpha_anxiety,
+  alpha_dep
+)
+
+# ---------------------------------------
+# 5. Correlation matrix
+# ---------------------------------------
+
+vars <- c("Gender", "age", "SelfEsteem", "Hope", "Anxiety", "DepressiveSympt")
+
+cors <- corr.test(df[vars])
+rmat <- cors$r
+pmat <- cors$p
+
+# ---------------------------------------
+# 6. Add significance stars
+# ---------------------------------------
+
+stars <- ifelse(pmat < .001, "***",
+         ifelse(pmat < .01, "**",
+         ifelse(pmat < .05, "*", "")))
+
+rstar <- rmat
+
+for(i in 1:nrow(rstar)){
+  for(j in 1:ncol(rstar)){
+    if(j < i){
+      rstar[i,j] <- paste0(round(rmat[i,j], 2), stars[i,j])
+    } else {
+      rstar[i,j] <- ""
+    }
+  }
+}
+
+# Place alphas on diagonal
+diag(rstar) <- round(alphas, 2)
+
+# ---------------------------------------
+# 7. Means and SDs
+# ---------------------------------------
+
+M  <- sapply(df[vars], mean, na.rm = TRUE)
+SD <- sapply(df[vars], sd, na.rm = TRUE)
+
+
+
+rstar
+ M
+SD
+```
+
+
+```{r}
+library(lavaan)
+# SUM SCORES instead of means
+df$SelfEsteem_sum <- rowSums(df[, esteem_items], na.rm = TRUE)
+df$Hope_sum       <- rowSums(df[, hope_items], na.rm = TRUE)
+df$Anxiety_sum    <- rowSums(df[, anxiety_items], na.rm = TRUE)
+df$Depress_sum    <- rowSums(df[, depressive_items], na.rm = TRUE)
+
+df_f <- df[df$Gender == 0, ]
+
+
+
+model_sum <- '
+
+  # Mediation paths
+  Hope_sum       ~ a1*SelfEsteem_sum
+  Anxiety_sum    ~ a2*SelfEsteem_sum
+  Depress_sum    ~ b1*Hope_sum + b2*Anxiety_sum + c*SelfEsteem_sum
+
+  # Indirect effects
+  indirect_Hope    := a1 * b1
+  indirect_Anxiety := a2 * b2
+  total_indirect   := indirect_Hope + indirect_Anxiety
+
+  # Total effect
+  total := c + total_indirect
+'
+
+
+# Fit the model on female participants only
+fit_female <- sem(model_sum, data = df_f)
+
+# Summary with standardized estimates
+summary(fit_female, standardized = TRUE, fit.measures = TRUE)
+
+
+fit_sum <- sem(
+  model_sum,
+  data = df_f,
+  se = "bootstrap",
+  bootstrap = 5000
+)
+```
+```{r}
+# Extract R-squared values for all endogenous variables
+lavInspect(fit_female, "r2")
+summary(
+  fit_sum,
+  standardized = TRUE,
+  rsquare = TRUE,
+  fit.measures = TRUE
+)
+```
+```{r}
+f_se_dep <- lm(Depress_sum ~ SelfEsteem_sum, data = df_f)
+summary(f_se_dep)
+```
+```{r}
+ggplot(df_f, aes(x = SelfEsteem_sum, y = Depress_sum)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Relationship Between Self-Esteem and Depressive Symptoms in Females",
+    x = "Self-Esteem",
+    y = "Depressive Symptoms"
+  ) +
+  theme_minimal()
+```
+```{r}
+ggplot(df_m, aes(x = Hope_sum, y = Depress_sum)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Relationship Between Hope and Depressive Symptoms in Males",
+    x = "Hope",
+    y = "Depressive Symptoms"
+  ) +
+  theme_minimal()
+```
+```{r}
+ggplot(df_f, aes(x = Hope_sum, y = Depress_sum)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Relationship Between Hope and Depressive Symptoms in Female Adolescents",
+    x = "Hope",
+    y = "Depressive Symptoms"
+  ) +
+  theme_minimal()
+```
+```{r}
+df_m <- df[df$Gender == 1, ]
+m_hope_dep <- lm(Depress_sum ~ Hope_sum, data = df_m)
+summary(m_hope_dep)
+
+```
+```{r}
+ggplot(df_m, aes(x = Hope_sum, y = Depress_sum)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Relationship Between Hope and Depressive Symptoms in Males",
+    x = "Hope",
+    y = "Depressive Symptoms"
+  ) +
+  theme_minimal()
+```
+```{r}
+m_hope_anx <- lm(Anxiety_sum ~ Hope_sum, data = df_m)
+summary(m_hope_anx)
+```
+```{r}
+ggplot(df_f, aes(x = Hope_sum, y = Anxiety_sum)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Relationship Between Hope and Anxiety in Males",
+    x = "Hope",
+    y = "Anxiety"
+  ) +
+  theme_minimal()
+```
+```{r}
+f_se_anx <- lm(Anxiety_sum ~ SelfEsteem_sum, data = df_f)
+summary(f_se_anx)
+```
+
+```{r}
+ggplot(df_f, aes(x = SelfEsteem_sum, y = Anxiety_sum)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Relationship Between Self Esteem and Anxiety in Females",
+    x = "Self Esteem",
+    y = "Anxiety"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+testmodel <- lm(Depress_sum ~ SelfEsteem_sum + Anxiety_sum + Hope_sum, data = df)
+summary(testmodel)
+```
+```{r}
+library(car)
+vif(testmodel)
+
+```
+```{r}
+testmodelf <- lm(Depress_sum ~ SelfEsteem_sum + Anxiety_sum + Hope_sum, data = df_f)
+summary(testmodelf)
+```
+```{r}
+vif(testmodelf)
+
+```
+```{r}
+testmodelm <- lm(Depress_sum ~ SelfEsteem_sum + Anxiety_sum + Hope_sum, data = df_m)
+summary(testmodelm)
+```
+```{r}
+vif(testmodelm)
+
+```
